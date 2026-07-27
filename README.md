@@ -32,7 +32,7 @@ This project provides CRUD operations for managing tasks, uses **in-memory stora
 Clone the repository:
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/josephayemlo/task-api.git
 ```
 Navigate into the project directory:
 ```bash
