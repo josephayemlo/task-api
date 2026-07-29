@@ -1,8 +1,55 @@
 //express server setup start
-const express = require('express')//import express module
+const express = require('express'); //import express module
 const app = express(); //create express app
 app.use(express.json());
 //express server setup end
+
+
+//database setup start
+const Database = require("better-sqlite3");
+const db = new Database("tasks.db");
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    completed BOOLEAN NOT NULL DEFAULT FALSE
+  )
+`);
+//database setup end
+
+
+// Prepared SQL statements start
+// Prepare SQL queries once when the application starts.
+// These compiled statements are reused throughout the app for better
+// performance and protection against SQL injection.
+
+const insertTask = db.prepare(`
+  INSERT INTO tasks (title)
+  VALUES (?)
+`);
+
+const getAllTasks = db.prepare(`
+  SELECT * FROM tasks
+`);
+
+const getTaskById = db.prepare(`
+  SELECT * FROM tasks
+  WHERE id = ?
+`);
+
+const updateTask = db.prepare(`
+  UPDATE tasks
+  SET title = ?, completed = ?
+  WHERE id = ?
+`);
+
+const deleteTask = db.prepare(`
+  DELETE FROM tasks
+  WHERE id = ?
+`);
+// Prepared SQL statements end
+
 
 //swagger setup start
 const swaggerUi = require("swagger-ui-express");
@@ -24,6 +71,7 @@ const swaggerSpec = swaggerJsdoc(options);
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 //swagger setup end
 
+
 //root endpoint
 app.get("/", (req, res) => {
     res.json({
@@ -32,17 +80,13 @@ app.get("/", (req, res) => {
         endpoints: ["/tasks"]
     });
 });
+
 app.get("/health", (req, res) => {
     res.json({
         status: "ok"
     });
 });
 
-// In-memory storage for tasks
-const tasks = []; 
-// Array to store tasks in memory( it uses RAM to store data, 
-// so the data will be lost when the server restarts. In a real-world application, 
-// we would typically use a database to persist data.) 
 
 /**
  * @swagger
@@ -67,17 +111,24 @@ const tasks = [];
  *         description: Task created successfully
  */
 
-
 //post request to create a new task
 app.post("/tasks", (req, res) => {
-    const task = {
-        id: Date.now(),
-        title: req.body.title, // Get the task title from the request body
-        completed: false
-    };
+    const { title } = req.body;
 
-    tasks.push(task);
+    // Validation
+    if (!title) {
+        return res.status(400).json({
+            message: "Title is required"
+        });
+    }
 
+    // Insert into the database
+    const result = insertTask.run(title);
+
+    // Retrieve the newly inserted task
+    const task = getTaskById.get(result.lastInsertRowid);
+
+    // Send it back to the client
     res.status(201).json(task);
 });
 
@@ -95,10 +146,10 @@ app.post("/tasks", (req, res) => {
 
 //retrieve all tasks
 app.get("/tasks", (req, res) => {
+    const tasks = getAllTasks.all();
+
     res.json(tasks);
 });
-
-
 
 
 /**
@@ -121,14 +172,16 @@ app.get("/tasks", (req, res) => {
  *         description: Task not found
  */
 
-// retreive specific task by id
+//retrieve specific task by id
 app.get("/tasks/:id", (req, res) => {
     const id = Number(req.params.id);
 
-    const task = tasks.find(task => task.id === id);
+    const task = getTaskById.get(id);
 
     if (!task) {
-        return res.status(404).json({ message: "Task not found" });
+        return res.status(404).json({
+            message: "Task not found"
+        });
     }
 
     res.json(task);
@@ -166,21 +219,27 @@ app.get("/tasks/:id", (req, res) => {
  *         description: Task not found
  */
 
-
-// update a specific task by id
+//update a specific task by id
 app.put("/tasks/:id", (req, res) => {
     const id = Number(req.params.id);
+    const { title, completed } = req.body;
 
-    const task = tasks.find(task => task.id === id);
+    // Check if task exists
+    const task = getTaskById.get(id);
 
     if (!task) {
-        return res.status(404).json({ message: "Task not found" });
+        return res.status(404).json({
+            message: "Task not found"
+        });
     }
 
-    task.title = req.body.title;
-    task.completed = req.body.completed;
+    // Update the task
+    updateTask.run(title, completed, id);
 
-    res.json(task);
+    // Retrieve the updated task
+    const updatedTask = getTaskById.get(id);
+
+    res.json(updatedTask);
 });
 
 
@@ -204,23 +263,29 @@ app.put("/tasks/:id", (req, res) => {
  *         description: Task not found
  */
 
-
-// delete a specific task by id
+//delete a specific task by id
 app.delete("/tasks/:id", (req, res) => {
     const id = Number(req.params.id);
 
-    const index = tasks.findIndex(task => task.id === id);
+    // Check if task exists
+    const task = getTaskById.get(id);
 
-    if (index === -1) {
-        return res.status(404).json({ message: "Task not found" });
+    if (!task) {
+        return res.status(404).json({
+            message: "Task not found"
+        });
     }
 
-    const deletedTask = tasks.splice(index, 1);
+    // Delete the task
+    deleteTask.run(id);
 
-    res.json(deletedTask[0]);
+    res.json(task);
 });
-// server
-const PORT = 3000
-app.listen(PORT, ()=> {
-    console.log('Listening on PORT 3000')
-})
+
+
+//server
+const PORT = 3000;
+
+app.listen(PORT, () => {
+    console.log("Listening on PORT 3000");
+});
