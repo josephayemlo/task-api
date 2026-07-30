@@ -6,49 +6,9 @@ app.use(express.json());
 
 
 //database setup start
-const Database = require("better-sqlite3");
-const db = new Database("tasks.db");
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    completed BOOLEAN NOT NULL DEFAULT FALSE
-  )
-`);
+const pool = require("./db");
 //database setup end
 
-
-// Prepared SQL statements start
-// Prepare SQL queries once when the application starts.
-// These compiled statements are reused throughout the app for better
-// performance and protection against SQL injection.
-
-const insertTask = db.prepare(`
-  INSERT INTO tasks (title)
-  VALUES (?)
-`);
-
-const getAllTasks = db.prepare(`
-  SELECT * FROM tasks
-`);
-
-const getTaskById = db.prepare(`
-  SELECT * FROM tasks
-  WHERE id = ?
-`);
-
-const updateTask = db.prepare(`
-  UPDATE tasks
-  SET title = ?, completed = ?
-  WHERE id = ?
-`);
-
-const deleteTask = db.prepare(`
-  DELETE FROM tasks
-  WHERE id = ?
-`);
-// Prepared SQL statements end
 
 
 //swagger setup start
@@ -112,26 +72,28 @@ app.get("/health", (req, res) => {
  */
 
 //post request to create a new task
-app.post("/tasks", (req, res) => {
+app.post("/tasks", async (req, res) => {
     const { title } = req.body;
 
-    // Validation
     if (!title) {
         return res.status(400).json({
             message: "Title is required"
         });
     }
 
-    // Insert into the database
-    const result = insertTask.run(title);
+    try {
+        const result = await pool.query(
+            "INSERT INTO tasks (title) VALUES ($1) RETURNING *",
+            [title]
+        );
 
-    // Retrieve the newly inserted task
-    const task = getTaskById.get(result.lastInsertRowid);
-
-    // Send it back to the client
-    res.status(201).json(task);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({
+            message: err.message
+        });
+    }
 });
-
 
 /**
  * @swagger
@@ -145,13 +107,19 @@ app.post("/tasks", (req, res) => {
  */
 
 //retrieve all tasks
-app.get("/tasks", (req, res) => {
-    const tasks = getAllTasks.all();
+app.get("/tasks", async (req, res) => {
+    try {
+        const result = await pool.query(
+            "SELECT * FROM tasks ORDER BY id"
+        );
 
-    res.json(tasks);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({
+            message: err.message
+        });
+    }
 });
-
-
 /**
  * @swagger
  * /tasks/{id}:
@@ -173,18 +141,27 @@ app.get("/tasks", (req, res) => {
  */
 
 //retrieve specific task by id
-app.get("/tasks/:id", (req, res) => {
+app.get("/tasks/:id", async (req, res) => {
     const id = Number(req.params.id);
 
-    const task = getTaskById.get(id);
+    try {
+        const result = await pool.query(
+            "SELECT * FROM tasks WHERE id = $1",
+            [id]
+        );
 
-    if (!task) {
-        return res.status(404).json({
-            message: "Task not found"
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: "Task not found"
+            });
+        }
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({
+            message: err.message
         });
     }
-
-    res.json(task);
 });
 
 
@@ -220,29 +197,34 @@ app.get("/tasks/:id", (req, res) => {
  */
 
 //update a specific task by id
-app.put("/tasks/:id", (req, res) => {
+app.put("/tasks/:id", async (req, res) => {
     const id = Number(req.params.id);
     const { title, completed } = req.body;
 
-    // Check if task exists
-    const task = getTaskById.get(id);
+    try {
+        const result = await pool.query(
+            `
+            UPDATE tasks
+            SET title = $1, completed = $2
+            WHERE id = $3
+            RETURNING *
+            `,
+            [title, completed, id]
+        );
 
-    if (!task) {
-        return res.status(404).json({
-            message: "Task not found"
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: "Task not found"
+            });
+        }
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({
+            message: err.message
         });
     }
-
-    // Update the task
-    updateTask.run(title, completed, id);
-
-    // Retrieve the updated task
-    const updatedTask = getTaskById.get(id);
-
-    res.json(updatedTask);
 });
-
-
 /**
  * @swagger
  * /tasks/{id}:
@@ -264,24 +246,28 @@ app.put("/tasks/:id", (req, res) => {
  */
 
 //delete a specific task by id
-app.delete("/tasks/:id", (req, res) => {
+app.delete("/tasks/:id", async (req, res) => {
     const id = Number(req.params.id);
 
-    // Check if task exists
-    const task = getTaskById.get(id);
+    try {
+        const result = await pool.query(
+            "DELETE FROM tasks WHERE id = $1 RETURNING *",
+            [id]
+        );
 
-    if (!task) {
-        return res.status(404).json({
-            message: "Task not found"
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                message: "Task not found"
+            });
+        }
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({
+            message: err.message
         });
     }
-
-    // Delete the task
-    deleteTask.run(id);
-
-    res.json(task);
 });
-
 
 //server
 const PORT = 3000;
