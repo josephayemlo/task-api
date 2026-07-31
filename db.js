@@ -11,20 +11,36 @@ const pool = new Pool({
   database: process.env.DB_NAME,
 });
 // Create the tasks table if it doesn't exist
-async function initializeDatabase() {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tasks (
-        id SERIAL PRIMARY KEY,
-        title TEXT NOT NULL,
-        completed BOOLEAN NOT NULL DEFAULT FALSE
-      )
-    `);
+const delay = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-    console.log("Connected to PostgreSQL");
-    console.log("Tasks table is ready");
-  } catch (err) {
-    console.error("Database initialization failed:", err);
+async function initializeDatabase() {
+  const maxAttempts = 10;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS tasks (
+          id SERIAL PRIMARY KEY,
+          title TEXT NOT NULL,
+          completed BOOLEAN NOT NULL DEFAULT FALSE
+        )
+      `);
+
+      console.log("Connected to PostgreSQL");
+      console.log("Tasks table is ready");
+      return;
+    } catch (err) {
+      if (attempt === maxAttempts) {
+        console.error("Database initialization failed:", err);
+        return;
+      }
+
+      console.error(
+        `Database connection attempt ${attempt}/${maxAttempts} failed; retrying in 2 seconds: ${err.message}`
+      );
+      await delay(2000);
+    }
   }
 }
 
